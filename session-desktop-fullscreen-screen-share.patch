@@ -1,0 +1,1568 @@
+diff --git a/ts/components/calling/CallButtons.tsx b/ts/components/calling/CallButtons.tsx
+index 5dc088271..a76c82e86 100644
+--- a/ts/components/calling/CallButtons.tsx
++++ b/ts/components/calling/CallButtons.tsx
+@@ -13,6 +13,8 @@ import { SessionContextMenuContainer } from '../SessionContextMenuContainer';
+ import { Menu, MenuItem } from '../menu/items/MenuItem';
+ import { SessionLucideIconButton } from '../icon/SessionIconButton';
+ import { LUCIDE_ICONS_UNICODE } from '../icon/lucide';
++import { tr } from '../../localization/localeTools';
++import { ScreenSharePicker } from './ScreenSharePicker';
+ 
+ const VideoInputMenu = ({
+   triggerId,
+@@ -239,7 +241,7 @@ const StyledCallActionButton = styled.div<{ $isFullScreen: boolean }>`
+     background-color: var(--call-buttons-action-background-color);
+     border-radius: 50%;
+     transition-duration: var(--default-duration);
+-    ${props => props.$isFullScreen && 'opacity: 0.4;'}
++    ${props => props.$isFullScreen && 'opacity: 0.9;'}
+     &:hover {
+       background-color: var(--call-buttons-action-background-hover-color);
+       ${props => props.$isFullScreen && 'opacity: 1;'}
+@@ -247,27 +249,114 @@ const StyledCallActionButton = styled.div<{ $isFullScreen: boolean }>`
+   }
+ `;
+ 
+-const ShowInFullScreenButton = ({ isFullScreen }: { isFullScreen: boolean }) => {
++/**
++ * A labelled call control. The icon alone was not discoverable: the caption is what makes
++ * "how do I go full screen" answerable without guessing.
++ */
++const StyledLabelledButton = styled.div`
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  justify-content: flex-end;
++`;
++
++const StyledButtonCaption = styled.span<{ $isFullScreen: boolean }>`
++  font-size: var(--font-size-xs);
++  color: var(--white-color);
++  text-shadow: 0 1px 2px var(--black-color);
++  margin-top: 2px;
++  white-space: nowrap;
++  user-select: none;
++  opacity: ${props => (props.$isFullScreen ? 0.95 : 0.8)};
++`;
++
++export const ShowInFullScreenButton = ({ isFullScreen }: { isFullScreen: boolean }) => {
+   const dispatch = getAppDispatch();
+ 
+-  const showInFullScreen = () => {
+-    if (isFullScreen) {
+-      dispatch(setFullScreenCall(false));
+-    } else {
+-      dispatch(setFullScreenCall(true));
+-    }
++  const showInFullScreen = (e?: MouseEvent<HTMLButtonElement>) => {
++    // the control bar sits inside the call overlay: without this, the click also reaches the
++    // overlay and any of its handlers
++    e?.stopPropagation();
++    dispatch(setFullScreenCall(!isFullScreen));
+   };
+ 
++  const label = tr('fullScreenToggle');
++
+   return (
+-    <StyledCallActionButton $isFullScreen={isFullScreen}>
+-      <SessionLucideIconButton
+-        iconSize={'max'}
+-        unicode={LUCIDE_ICONS_UNICODE.MAXIMIZE}
+-        onClick={showInFullScreen}
+-        iconColor="var(--black-color)"
+-        margin="10px"
+-      />
+-    </StyledCallActionButton>
++    <StyledLabelledButton>
++      <StyledCallActionButton $isFullScreen={isFullScreen}>
++        <SessionLucideIconButton
++          iconSize={'max'}
++          unicode={isFullScreen ? LUCIDE_ICONS_UNICODE.MINIMIZE : LUCIDE_ICONS_UNICODE.MAXIMIZE}
++          onClick={showInFullScreen}
++          iconColor="var(--black-color)"
++          margin="10px"
++          title={label}
++          ariaLabel={label}
++          dataTestId="toggle-full-screen"
++        />
++      </StyledCallActionButton>
++      <StyledButtonCaption $isFullScreen={isFullScreen}>{label}</StyledButtonCaption>
++    </StyledLabelledButton>
++  );
++};
++
++/**
++ * Screen sharing reuses the call's single video sender, so starting a share turns the camera off
++ * and stopping it puts the camera back. See CallManager.startScreenShare.
++ */
++export const ScreenShareButton = ({
++  isFullScreen,
++  isScreenSharing,
++}: {
++  isFullScreen: boolean;
++  isScreenSharing: boolean;
++}) => {
++  const [pickerOpen, setPickerOpen] = useState(false);
++
++  const toggleScreenShare = (e?: MouseEvent<HTMLButtonElement>) => {
++    // the control bar lives inside the call overlay; the click must not reach anything behind it
++    e?.stopPropagation();
++    if (isScreenSharing) {
++      void CallManager.stopScreenShare();
++      return;
++    }
++    setPickerOpen(true);
++  };
++
++  const label = isScreenSharing ? `${tr('share')} · ${tr('cancel')}` : tr('share');
++
++  return (
++    <StyledLabelledButton>
++      {pickerOpen ? (
++        <ScreenSharePicker
++          onPicked={sourceId => {
++            setPickerOpen(false);
++            void CallManager.startScreenShare(sourceId);
++          }}
++          onCancel={() => {
++            setPickerOpen(false);
++          }}
++        />
++      ) : null}
++      <StyledCallActionButton $isFullScreen={isFullScreen}>
++        <SessionLucideIconButton
++          iconSize={'max'}
++          unicode={
++            isScreenSharing
++              ? LUCIDE_ICONS_UNICODE.SCREEN_SHARE_OFF
++              : LUCIDE_ICONS_UNICODE.SCREEN_SHARE
++          }
++          onClick={toggleScreenShare}
++          iconColor={isScreenSharing ? 'var(--danger-color)' : 'var(--black-color)'}
++          margin="10px"
++          title={label}
++          ariaLabel={label}
++          dataTestId="toggle-screen-share"
++        />
++      </StyledCallActionButton>
++      <StyledButtonCaption $isFullScreen={isFullScreen}>{label}</StyledButtonCaption>
++    </StyledLabelledButton>
+   );
+ };
+ 
+@@ -357,6 +446,7 @@ const handleSpeakerToggle = async (
+ 
+ const StyledCallWindowControls = styled.div<{ $isFullScreen: boolean; $makeVisible: boolean }>`
+   position: absolute;
++  z-index: 10;
+ 
+   bottom: 0px;
+   width: 100%;
+@@ -377,7 +467,7 @@ const StyledCallWindowControls = styled.div<{ $isFullScreen: boolean; $makeVisib
+   ${props =>
+     props.$isFullScreen &&
+     `
+-    opacity: 0.4;
++    opacity: 0.9;
+     &:hover {
+       opacity: 1;
+     }
+@@ -390,18 +480,18 @@ export const CallWindowControls = ({
+   currentConnectedAudioOutputs,
+   isAudioMuted,
+   isAudioOutputMuted,
+-  remoteStreamVideoIsMuted,
+   localStreamVideoIsMuted,
+   isFullScreen,
++  isScreenSharing,
+ }: {
+   isAudioMuted: boolean;
+   isAudioOutputMuted: boolean;
+   localStreamVideoIsMuted: boolean;
+-  remoteStreamVideoIsMuted: boolean;
+   currentConnectedAudioInputs: Array<InputItem>;
+   currentConnectedAudioOutputs: Array<InputItem>;
+   currentConnectedCameras: Array<InputItem>;
+   isFullScreen: boolean;
++  isScreenSharing: boolean;
+ }) => {
+   const [makeVisible, setMakeVisible] = useState(true);
+ 
+@@ -424,7 +514,13 @@ export const CallWindowControls = ({
+   }, [isFullScreen]);
+   return (
+     <StyledCallWindowControls $isFullScreen={isFullScreen} $makeVisible={makeVisible}>
+-      {!remoteStreamVideoIsMuted && <ShowInFullScreenButton isFullScreen={isFullScreen} />}
++      {/*
++        Always rendered. It used to be hidden unless the *remote* peer was sending video, which
++        meant the only way into full screen disappeared exactly when you wanted to present your
++        own screen to someone whose camera is off.
++      */}
++      <ShowInFullScreenButton isFullScreen={isFullScreen} />
++      <ScreenShareButton isFullScreen={isFullScreen} isScreenSharing={isScreenSharing} />
+ 
+       <VideoInputButton
+         currentConnectedCameras={currentConnectedCameras}
+diff --git a/ts/components/calling/CallInFullScreenContainer.tsx b/ts/components/calling/CallInFullScreenContainer.tsx
+index e1f6db5db..dcfbc05d4 100644
+--- a/ts/components/calling/CallInFullScreenContainer.tsx
++++ b/ts/components/calling/CallInFullScreenContainer.tsx
+@@ -1,4 +1,4 @@
+-import { useEffect, useRef } from 'react';
++import { useCallback, useEffect, useRef } from 'react';
+ import { useSelector } from 'react-redux';
+ 
+ import useKey from 'react-use/lib/useKey';
+@@ -10,6 +10,7 @@ import {
+   getCallIsInFullScreen,
+   getHasOngoingCallWithFocusedConvo,
+ } from '../../state/selectors/call';
++import { tr } from '../../localization/localeTools';
+ import { CallWindowControls } from './CallButtons';
+ import { StyledVideoElement } from './DraggableCallContainer';
+ 
+@@ -25,6 +26,15 @@ const CallInFullScreenVisible = styled.div`
+   background-color: var(--black-color);
+   border: var(--default-borders);
+   opacity: 1;
++
++  /*
++   * When the element is the document's fullscreen element the browser sizes it to the display
++   * itself, so the absolute inset above no longer applies.
++   */
++  &:fullscreen {
++    width: 100vw;
++    height: 100vh;
++  }
+ `;
+ 
+ const StyledLocalVideoElement = styled.video<{ $isVideoMuted: boolean }>`
+@@ -36,6 +46,27 @@ const StyledLocalVideoElement = styled.video<{ $isVideoMuted: boolean }>`
+   opacity: ${props => (props.$isVideoMuted ? 0 : 1)};
+ `;
+ 
++/**
++ * A permanently visible hint in the corner of the full screen call. Full screen used to be a mode
++ * you could fall into with no indication of how to leave it.
++ */
++const StyledExitHint = styled.button`
++  position: absolute;
++  top: 12px;
++  left: 50%;
++  transform: translateX(-50%);
++  z-index: 10;
++  padding: 6px 14px;
++  border-radius: 999px;
++  background-color: rgba(0, 0, 0, 0.55);
++  color: var(--white-color);
++  font-size: var(--font-size-sm);
++  white-space: nowrap;
++  user-select: none;
++  cursor: pointer;
++  border: 0;
++`;
++
+ export const CallInFullScreenContainer = () => {
+   const ongoingCallWithFocused = useSelector(getHasOngoingCallWithFocusedConvo);
+   const hasOngoingCallFullScreen = useSelector(getCallIsInFullScreen);
+@@ -60,25 +91,61 @@ const CallInFullScreenContainerInner = () => {
+     isAudioMuted,
+     isAudioOutputMuted,
+     localStreamVideoIsMuted,
++    isScreenSharing,
++    isRemoteScreenSharing,
+   } = useVideoCallEventsListener('CallInFullScreenContainer', true);
+ 
+   const videoRefRemote = useRef<HTMLVideoElement>(null);
+   const videoRefLocal = useRef<HTMLVideoElement>(null);
++  const containerRef = useRef<HTMLDivElement>(null);
+ 
+-  function toggleFullScreenOFF() {
++  const toggleFullScreenOFF = useCallback(() => {
+     dispatch(setFullScreenCall(false));
+-  }
++  }, [dispatch]);
+ 
+   useKey('Escape', () => {
+     toggleFullScreenOFF();
+   });
+ 
++  /**
++   * Ask the OS/window for real full screen — the overlay on its own only ever filled the app
++   * window. The element has to be mounted before requestFullscreen() can be called on it, which
++   * is why this lives here and not in the button that dispatches setFullScreenCall(true).
++   */
+   useEffect(() => {
+-    // close fullscreen mode if the remote video gets muted
+-    if (remoteStreamVideoIsMuted) {
+-      dispatch(setFullScreenCall(false));
++    const element = containerRef.current;
++    if (!element) {
++      return undefined;
+     }
+-  }, [remoteStreamVideoIsMuted, dispatch]);
++
++    if (!document.fullscreenElement) {
++      void Promise.resolve(element.requestFullscreen?.()).catch(e => {
++        // not fatal: the in-window overlay is still shown, it just does not cover the display
++        window.log?.warn('requestFullscreen failed:', e?.message);
++      });
++    }
++
++    /**
++     * The browser exits DOM full screen on its own (Escape, the OS green button, another app
++     * taking over the display) without telling React. Without this the app would keep believing
++     * it is in full screen and the overlay would stay up in a windowed app.
++     */
++    const onFullScreenChange = () => {
++      if (!document.fullscreenElement) {
++        dispatch(setFullScreenCall(false));
++      }
++    };
++    document.addEventListener('fullscreenchange', onFullScreenChange);
++
++    return () => {
++      document.removeEventListener('fullscreenchange', onFullScreenChange);
++      if (document.fullscreenElement === element) {
++        void Promise.resolve(document.exitFullscreen?.()).catch(() => {
++          /* leaving full screen must never throw on unmount */
++        });
++      }
++    };
++  }, [dispatch]);
+ 
+   if (videoRefRemote?.current) {
+     if (videoRefRemote.current.srcObject !== remoteStream) {
+@@ -93,15 +160,20 @@ const CallInFullScreenContainerInner = () => {
+   }
+ 
+   return (
+-    <CallInFullScreenVisible onClick={toggleFullScreenOFF}>
++    <CallInFullScreenVisible ref={containerRef}>
++      <StyledExitHint type="button" onClick={toggleFullScreenOFF}>
++        {tr('fullScreenToggle')} <kbd>Esc</kbd>
++      </StyledExitHint>
+       <StyledVideoElement
+         ref={videoRefRemote}
+         autoPlay={true}
+         $isVideoMuted={remoteStreamVideoIsMuted}
++        $screenShare={isRemoteScreenSharing}
+       />
+       <StyledLocalVideoElement
+         ref={videoRefLocal}
+         autoPlay={true}
++        muted={true}
+         $isVideoMuted={localStreamVideoIsMuted}
+       />
+       <CallWindowControls
+@@ -111,8 +183,8 @@ const CallInFullScreenContainerInner = () => {
+         isAudioMuted={isAudioMuted}
+         isAudioOutputMuted={isAudioOutputMuted}
+         localStreamVideoIsMuted={localStreamVideoIsMuted}
+-        remoteStreamVideoIsMuted={remoteStreamVideoIsMuted}
+         isFullScreen={true}
++        isScreenSharing={isScreenSharing}
+       />
+     </CallInFullScreenVisible>
+   );
+diff --git a/ts/components/calling/DraggableCallContainer.tsx b/ts/components/calling/DraggableCallContainer.tsx
+index 7519b8042..9c6ee31c6 100644
+--- a/ts/components/calling/DraggableCallContainer.tsx
++++ b/ts/components/calling/DraggableCallContainer.tsx
+@@ -23,11 +23,12 @@ export const DraggableCallWindow = styled.div`
+   border-radius: var(--border-radius);
+ `;
+ 
+-export const StyledVideoElement = styled.video<{ $isVideoMuted: boolean }>`
++export const StyledVideoElement = styled.video<{ $isVideoMuted: boolean; $screenShare?: boolean }>`
+   padding: 0 1rem;
+   height: 100%;
+   width: 100%;
+   opacity: ${props => (props.$isVideoMuted ? 0 : 1)};
++  ${props => props.$screenShare && 'object-fit: contain;'}
+ `;
+ 
+ const StyledDraggableVideoElement = styled(StyledVideoElement)`
+@@ -66,10 +67,8 @@ export const DraggableCallContainer = () => {
+   const [lastPositionY, setLastPositionY] = useState(0);
+ 
+   const ongoingCallPubkey = ongoingCallProps?.id;
+-  const { remoteStreamVideoIsMuted, remoteStream } = useVideoCallEventsListener(
+-    'DraggableCallContainer',
+-    false
+-  );
++  const { remoteStreamVideoIsMuted, remoteStream, isRemoteScreenSharing } =
++    useVideoCallEventsListener('DraggableCallContainer', false);
+   const draggableRef = useRef<HTMLDivElement>(null);
+   const videoRefRemote = useRef<HTMLVideoElement>(null);
+ 
+@@ -129,6 +128,7 @@ export const DraggableCallContainer = () => {
+             ref={videoRefRemote}
+             autoPlay={true}
+             $isVideoMuted={remoteStreamVideoIsMuted}
++            $screenShare={isRemoteScreenSharing}
+           />
+           {remoteStreamVideoIsMuted && ongoingCallPubkey && (
+             <CenteredAvatarInDraggable>
+diff --git a/ts/components/calling/InConversationCallContainer.tsx b/ts/components/calling/InConversationCallContainer.tsx
+index 308f828f1..85c4b6a8d 100644
+--- a/ts/components/calling/InConversationCallContainer.tsx
++++ b/ts/components/calling/InConversationCallContainer.tsx
+@@ -153,6 +153,8 @@ export const InConversationCallContainer = () => {
+     remoteStreamVideoIsMuted,
+     isAudioMuted,
+     isAudioOutputMuted,
++    isScreenSharing,
++    isRemoteScreenSharing,
+   } = useVideoCallEventsListener('InConversationCallContainer', true);
+ 
+   if (videoRefRemote?.current && videoRefLocal?.current) {
+@@ -195,6 +197,7 @@ export const InConversationCallContainer = () => {
+             ref={videoRefRemote}
+             autoPlay={true}
+             $isVideoMuted={remoteStreamVideoIsMuted}
++            $screenShare={isRemoteScreenSharing}
+           />
+           {remoteStreamVideoIsMuted && (
+             <CenteredAvatarInConversation>
+@@ -223,8 +226,8 @@ export const InConversationCallContainer = () => {
+           currentConnectedAudioOutputs={currentConnectedAudioOutputs}
+           isAudioOutputMuted={isAudioOutputMuted}
+           localStreamVideoIsMuted={localStreamVideoIsMuted}
+-          remoteStreamVideoIsMuted={remoteStreamVideoIsMuted}
+           isFullScreen={false}
++          isScreenSharing={isScreenSharing}
+         />
+       </RelativeCallWindow>
+     </InConvoCallWindow>
+diff --git a/ts/components/calling/ScreenSharePicker.tsx b/ts/components/calling/ScreenSharePicker.tsx
+new file mode 100644
+index 000000000..bf7f7360c
+--- /dev/null
++++ b/ts/components/calling/ScreenSharePicker.tsx
+@@ -0,0 +1,202 @@
++import { useEffect, useRef, useState } from 'react';
++import styled from 'styled-components';
++import { tr } from '../../localization/localeTools';
++
++import {
++  getScreenShareSources,
++  openScreenRecordingSettings,
++  setScreenShareSource,
++  ScreenShareSource,
++} from '../../util/screenShare';
++import { SessionSpinner } from '../loading';
++
++const StyledPanel = styled.dialog`
++  width: min(820px, 90vw);
++  max-height: 80vh;
++  padding: 20px;
++  border-radius: var(--border-radius);
++  background-color: var(--modal-background-content-color);
++  border: var(--default-borders);
++  box-shadow: var(--modal-drop-shadow);
++  color: var(--text-primary-color);
++  &::backdrop {
++    background-color: rgba(0, 0, 0, 0.6);
++  }
++`;
++
++const StyledTitle = styled.h2`
++  margin: 0 0 12px 0;
++  font-size: var(--font-size-lg);
++`;
++
++const StyledGrid = styled.div`
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
++  gap: 12px;
++`;
++
++const StyledSource = styled.button`
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  gap: 6px;
++  padding: 8px;
++  cursor: pointer;
++  background-color: var(--background-secondary-color);
++  border: 2px solid transparent;
++  border-radius: var(--border-radius);
++  color: inherit;
++  font-size: var(--font-size-xs);
++
++  &:hover,
++  &:focus-visible {
++    border-color: var(--primary-color);
++  }
++
++  img {
++    width: 100%;
++    aspect-ratio: 16 / 9;
++    object-fit: contain;
++    background-color: var(--black-color);
++    border-radius: 4px;
++  }
++
++  span {
++    width: 100%;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++    text-align: center;
++  }
++`;
++
++const StyledFooter = styled.div`
++  display: flex;
++  justify-content: flex-end;
++  gap: 10px;
++  margin-top: 18px;
++`;
++
++const StyledTextButton = styled.button`
++  padding: 8px 16px;
++  cursor: pointer;
++  border-radius: var(--border-radius);
++  border: var(--default-borders);
++  background-color: transparent;
++  color: var(--text-primary-color);
++
++  &:hover {
++    background-color: var(--background-secondary-color);
++  }
++`;
++
++const StyledMessage = styled.p`
++  margin: 12px 0;
++  color: var(--text-secondary-color);
++`;
++
++/**
++ * Session's own screen-share picker.
++ *
++ * Electron does not provide one, and the OS picker is only available on some platforms and OS
++ * versions, so this is the single portable path: ask the main process for the shareable sources,
++ * show them, and hand the chosen id back to the caller which then calls getDisplayMedia().
++ */
++export const ScreenSharePicker = ({
++  onPicked,
++  onCancel,
++}: {
++  onPicked: (sourceId: string) => void;
++  onCancel: () => void;
++}) => {
++  const [loading, setLoading] = useState(true);
++  const [sources, setSources] = useState<Array<ScreenShareSource>>([]);
++  const [permissionDenied, setPermissionDenied] = useState(false);
++
++  const dialog = useRef<HTMLDialogElement>(null);
++  const picked = useRef(false);
++
++  useEffect(() => {
++    dialog.current?.showModal();
++    let cancelled = false;
++
++    async function loadSources() {
++      try {
++        const result = await getScreenShareSources();
++        if (cancelled) {
++          return;
++        }
++        setPermissionDenied(result.screenAccess !== 'granted');
++        setSources(result.sources);
++      } catch (e) {
++        if (!cancelled) {
++          window.log?.warn('ScreenSharePicker could not list sources:', e?.message);
++          setSources([]);
++        }
++      } finally {
++        if (!cancelled) {
++          setLoading(false);
++        }
++      }
++    }
++    void loadSources();
++
++    return () => {
++      cancelled = true;
++      if (!picked.current) {
++        void setScreenShareSource(null);
++      }
++    };
++  }, []);
++
++  return (
++    <StyledPanel
++      ref={dialog}
++      aria-labelledby="call-share-title"
++      onCancel={event => {
++        event.preventDefault();
++        onCancel();
++      }}
++      onKeyDown={event => {
++        if (event.key === 'Escape') {
++          event.stopPropagation();
++        }
++      }}
++    >
++      <StyledTitle id="call-share-title">{tr('share')}</StyledTitle>
++      {loading && <SessionSpinner $loading={true} />}
++      {permissionDenied && (
++        <>
++          <StyledMessage>{tr('permissionsRequired')}</StyledMessage>
++          <StyledTextButton type="button" onClick={() => void openScreenRecordingSettings()}>
++            {tr('openSettings')}
++          </StyledTextButton>
++        </>
++      )}
++      {!loading && !permissionDenied && !sources.length && (
++        <StyledMessage>{tr('searchMatchesNone')}</StyledMessage>
++      )}
++      <StyledGrid>
++        {sources.map(source => (
++          <StyledSource
++            key={source.id}
++            type="button"
++            title={source.name}
++            onClick={() => {
++              picked.current = true;
++              onPicked(source.id);
++            }}
++          >
++            {source.thumbnailDataUrl && <img src={source.thumbnailDataUrl} alt="" />}
++            <span>{source.name}</span>
++          </StyledSource>
++        ))}
++      </StyledGrid>
++      <StyledFooter>
++        <StyledTextButton type="button" onClick={onCancel}>
++          {tr('cancel')}
++        </StyledTextButton>
++      </StyledFooter>
++    </StyledPanel>
++  );
++};
+diff --git a/ts/components/icon/lucide.ts b/ts/components/icon/lucide.ts
+index 1ca6c82e3..cc148b599 100644
+--- a/ts/components/icon/lucide.ts
++++ b/ts/components/icon/lucide.ts
+@@ -35,6 +35,9 @@ export enum LUCIDE_ICONS_UNICODE {
+   MAIL = '',
+   MAIL_OPEN = '',
+   MAXIMIZE = '',
++  MINIMIZE = '',
++  SCREEN_SHARE = '',
++  SCREEN_SHARE_OFF = '',
+   MESSAGE_SQUARE = '',
+   MESSAGE_SQUARE_WARNING = '',
+   MIC = '',
+@@ -126,6 +129,9 @@ export function isIconToMirrorRtl(unicode: LUCIDE_ICONS_UNICODE) {
+     case LUCIDE_ICONS_UNICODE.MAIL:
+     case LUCIDE_ICONS_UNICODE.MAIL_OPEN:
+     case LUCIDE_ICONS_UNICODE.MAXIMIZE:
++    case LUCIDE_ICONS_UNICODE.MINIMIZE:
++    case LUCIDE_ICONS_UNICODE.SCREEN_SHARE:
++    case LUCIDE_ICONS_UNICODE.SCREEN_SHARE_OFF:
+     case LUCIDE_ICONS_UNICODE.MIC:
+     case LUCIDE_ICONS_UNICODE.MOON:
+     case LUCIDE_ICONS_UNICODE.OCTAGON_X:
+diff --git a/ts/hooks/useVideoEventListener.ts b/ts/hooks/useVideoEventListener.ts
+index 1fe3880cb..72f2c30d2 100644
+--- a/ts/hooks/useVideoEventListener.ts
++++ b/ts/hooks/useVideoEventListener.ts
+@@ -24,8 +24,17 @@ export function useVideoCallEventsListener(uniqueId: string, onSame: boolean) {
+   const [currentSelectedAudioOutput, setCurrentSelectedAudioOutput] =
+     useState(DEVICE_DISABLED_DEVICE_ID);
+   const [remoteStreamVideoIsMuted, setRemoteStreamVideoIsMuted] = useState(true);
+-  const mountedStateFunc = useMountedState();
+-  const mountedState = mountedStateFunc();
++  const [isScreenSharing, setIsScreenSharing] = useState(false);
++  const [isRemoteScreenSharing, setIsRemoteScreenSharing] = useState(false);
++  /**
++   * Note: this is the getter, deliberately called inside the listener rather than during render.
++   * `useMountedState()()` evaluated at render time is `false` on the very first render, so a
++   * listener registered with that value captured would ignore every update it was ever given.
++   * The full screen call overlay mounts once and is not re-rendered by anything else, so it was
++   * stuck showing the state the call had when it opened: no remote video, and no idea that a
++   * screen share was running.
++   */
++  const isMounted = useMountedState();
+ 
+   const [currentConnectedCameras, setCurrentConnectedCameras] = useState<Array<InputItem>>([]);
+   const [currentConnectedAudioInputs, setCurrentConnectedAudioInputs] = useState<Array<InputItem>>(
+@@ -52,14 +61,18 @@ export function useVideoCallEventsListener(uniqueId: string, onSame: boolean) {
+           remoteStream: lRemoteStream,
+           isAudioMuted,
+           currentSelectedAudioOutput: outputSelected,
++          isScreenSharing: lIsScreenSharing,
++          isRemoteScreenSharing: lIsRemoteScreenSharing,
+         } = options;
+-        if (mountedState) {
++        if (isMounted()) {
+           setLocalStream(lLocalStream);
+           setRemoteStream(lRemoteStream);
+           setRemoteStreamVideoIsMuted(isRemoteVideoStreamMuted);
+           setLocalStreamVideoIsMuted(isLocalVideoStreamMuted);
+           setOurAudioIsMuted(isAudioMuted);
+           setCurrentSelectedAudioOutput(outputSelected);
++          setIsScreenSharing(lIsScreenSharing);
++          setIsRemoteScreenSharing(lIsRemoteScreenSharing);
+ 
+           setCurrentConnectedCameras(camerasList);
+           setCurrentConnectedAudioInputs(audioInputsList);
+@@ -71,7 +84,7 @@ export function useVideoCallEventsListener(uniqueId: string, onSame: boolean) {
+     return () => {
+       removeVideoEventsListener(uniqueId);
+     };
+-  }, [ongoingCallPubkey, selectedConversationKey, isFullScreen, mountedState, onSame, uniqueId]);
++  }, [ongoingCallPubkey, selectedConversationKey, isFullScreen, isMounted, onSame, uniqueId]);
+ 
+   return {
+     currentConnectedAudioInputs,
+@@ -84,5 +97,7 @@ export function useVideoCallEventsListener(uniqueId: string, onSame: boolean) {
+     remoteStream,
+     isAudioMuted: ourAudioIsMuted,
+     isAudioOutputMuted: currentSelectedAudioOutput === DEVICE_DISABLED_DEVICE_ID,
++    isScreenSharing,
++    isRemoteScreenSharing,
+   };
+ }
+diff --git a/ts/mains/main_node.ts b/ts/mains/main_node.ts
+index ea01af993..4b8224090 100644
+--- a/ts/mains/main_node.ts
++++ b/ts/mains/main_node.ts
+@@ -89,6 +89,7 @@ import * as updater from '../updater/index';
+ 
+ import { ephemeralConfig } from '../node/config/ephemeral_config';
+ import { createTemplate } from '../node/menu';
++import { installScreenSharePicker } from '../node/screenShare';
+ import { installPermissionsHandler } from '../node/permissions';
+ import { installFileHandler, installWebHandler } from '../node/protocol_filter';
+ import { sqlNode } from '../node/sql';
+@@ -377,6 +378,13 @@ async function createWindow() {
+   mainWindow = new BrowserWindow(windowOptions);
+ 
+   setupSpellChecker(mainWindow);
++  let callFullscreen = false;
++  mainWindow.webContents.on('enter-html-full-screen', () => {
++    callFullscreen = true;
++  });
++  mainWindow.webContents.on('leave-html-full-screen', () => {
++    callFullscreen = false;
++  });
+ 
+   const setWindowFocus = () => {
+     if (!mainWindow) {
+@@ -413,7 +421,7 @@ async function createWindow() {
+   );
+ 
+   function captureAndSaveWindowStats() {
+-    if (!mainWindow) {
++    if (!mainWindow || callFullscreen) {
+       return;
+     }
+ 
+@@ -460,6 +468,7 @@ async function createWindow() {
+ 
+   const urlToLoad = prepareURL([getAppRootPath(), 'background.html']);
+ 
++  installScreenSharePicker(mainWindow, urlToLoad, userConfig);
+   await mainWindow?.loadURL(urlToLoad).catch(err => {
+     console.error('Failed to load background.html:', err);
+     mainWindow = null;
+diff --git a/ts/node/permissions.ts b/ts/node/permissions.ts
+index e1e5c4726..7f3b0b743 100644
+--- a/ts/node/permissions.ts
++++ b/ts/node/permissions.ts
+@@ -11,6 +11,7 @@ const PERMISSIONS: Record<string, boolean> = {
+ 
+   // Off by default, can be enabled by user
+   media: false, // required for access to microphone, used for voice notes
++  'display-capture': false, // required to share a screen or a window during a call
+ 
+   // Not allowed
+   geolocation: false,
+@@ -21,8 +22,13 @@ const PERMISSIONS: Record<string, boolean> = {
+ 
+ function createPermissionHandler(userConfig: UserConfig) {
+   return (_webContents: any, permission: any, callback: any) => {
+-    // We default 'media' permission to false, but the user can override that
+-    if (permission === 'media' && userConfig.get('mediaPermissions')) {
++    // We default 'media' permission to false, but the user can override that.
++    // Screen sharing only happens inside a call, which already needs this permission, so it is
++    // gated on the same setting rather than on one of its own.
++    if (
++      (permission === 'media' || permission === 'display-capture') &&
++      userConfig.get('mediaPermissions')
++    ) {
+       return callback(true);
+     }
+ 
+diff --git a/ts/node/screenShare.ts b/ts/node/screenShare.ts
+new file mode 100644
+index 000000000..eacad67aa
+--- /dev/null
++++ b/ts/node/screenShare.ts
+@@ -0,0 +1,133 @@
++import {
++  BrowserWindow,
++  desktopCapturer,
++  DesktopCapturerSource,
++  shell,
++  systemPreferences,
++  WebFrameMain,
++} from 'electron';
++
++import { UserConfig } from './config/user_config';
++import type { ScreenShareSourcesResult } from '../util/screenShare';
++
++export function installScreenSharePicker(
++  window: BrowserWindow,
++  pageURL: string,
++  config: UserConfig
++) {
++  const contents = window.webContents;
++  const page = new URL(pageURL);
++  const session = contents.session;
++  let generation = 0;
++  let choices: Array<DesktopCapturerSource> = [];
++  let selection: { source: DesktopCapturerSource; expires: number } | null = null;
++
++  function clear() {
++    generation += 1;
++    choices = [];
++    selection = null;
++  }
++
++  function allowed(frame: WebFrameMain | null) {
++    if (
++      !frame ||
++      contents.isDestroyed() ||
++      frame !== contents.mainFrame ||
++      !config.get('mediaPermissions')
++    ) {
++      return false;
++    }
++    const current = new URL(frame.url);
++    return (
++      current.protocol === page.protocol &&
++      current.host === page.host &&
++      current.pathname === page.pathname
++    );
++  }
++
++  const screenAccess = () =>
++    process.platform === 'darwin' ? systemPreferences.getMediaAccessStatus('screen') : 'granted';
++
++  contents.ipc.handle(
++    'get-screen-share-sources',
++    async (event): Promise<ScreenShareSourcesResult> => {
++      if (!allowed(event.senderFrame)) {
++        return { screenAccess: 'denied', sources: [] };
++      }
++      clear();
++      const request = generation;
++      let status = screenAccess();
++      if (status === 'granted' || status === 'not-determined') {
++        const sources = await desktopCapturer.getSources({
++          types: ['screen', 'window'],
++          thumbnailSize: { width: 320, height: 180 },
++        });
++        status = screenAccess();
++        if (request === generation && allowed(event.senderFrame) && status === 'granted') {
++          choices = sources;
++          return {
++            screenAccess: status,
++            sources: sources.map(source => ({
++              id: source.id,
++              name: source.name,
++              thumbnailDataUrl: source.thumbnail.isEmpty() ? null : source.thumbnail.toDataURL(),
++            })),
++          };
++        }
++      }
++      return { screenAccess: status, sources: [] };
++    }
++  );
++
++  contents.ipc.handle('set-screen-share-source', (event, id: string | null) => {
++    if (!allowed(event.senderFrame)) {
++      return false;
++    }
++    const source = choices.find(item => item.id === id);
++    clear();
++    if (!source) {
++      return false;
++    }
++    selection = { source, expires: Date.now() + 5000 };
++    return true;
++  });
++
++  contents.ipc.handle('open-screen-recording-settings', async event => {
++    if (process.platform === 'darwin' && allowed(event.senderFrame)) {
++      await shell.openExternal(
++        'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
++      );
++    }
++  });
++
++  session.setDisplayMediaRequestHandler((request, callback) => {
++    // Electron 40 accepts null to decline a request. Its declaration only lists Streams.
++    const respond = callback as (streams: Electron.Streams | null) => void;
++    if (
++      !allowed(request.frame) ||
++      !request.userGesture ||
++      !request.videoRequested ||
++      request.audioRequested
++    ) {
++      respond(null);
++      return;
++    }
++    const picked = selection;
++    clear();
++    respond(
++      picked && picked.expires >= Date.now() && screenAccess() === 'granted'
++        ? { video: picked.source }
++        : null
++    );
++  });
++
++  contents.on('did-start-navigation', details => {
++    if (details.isMainFrame && !details.isSameDocument) {
++      clear();
++    }
++  });
++  contents.once('destroyed', () => {
++    clear();
++    session.setDisplayMediaRequestHandler(null);
++  });
++}
+diff --git a/ts/react.d.ts b/ts/react.d.ts
+index 609444ead..959cd8f13 100644
+--- a/ts/react.d.ts
++++ b/ts/react.d.ts
+@@ -297,6 +297,8 @@ declare module 'react' {
+     | 'staged-attachments-container'
+     | 'path-light-container'
+     | 'end-call'
++    | 'toggle-full-screen'
++    | 'toggle-screen-share'
+     | 'end-voice-message'
+     | 'edit-profile-icon'
+     | 'edit-community-details'
+diff --git a/ts/session/utils/calling/CallManager.ts b/ts/session/utils/calling/CallManager.ts
+index 9dbde6bbe..05b443176 100644
+--- a/ts/session/utils/calling/CallManager.ts
++++ b/ts/session/utils/calling/CallManager.ts
+@@ -30,13 +30,14 @@ import { DisappearingMessages } from '../../disappearing_messages';
+ import { ReadyToDisappearMsgUpdate } from '../../disappearing_messages/types';
+ import { MessageQueue, MessageSender } from '../../sending';
+ import { getIsRinging } from '../RingingManager';
+-import { getBlackSilenceMediaStream } from './Silence';
++import { getBlackSilenceMediaStream, getBlackVideoTrack } from './Silence';
+ import { ed25519Str } from '../String';
+ import { WithMessageHash } from '../../types/with';
+ import { NetworkTime } from '../../../util/NetworkTime';
+ import { sleepFor } from '../Promise';
+ import { tr } from '../../../localization/localeTools';
+ import { uuidV4 } from '../../../util/uuid';
++import { setScreenShareSource } from '../../../util/screenShare';
+ 
+ export type InputItem = { deviceId: string; label: string };
+ 
+@@ -65,6 +66,17 @@ export type CallManagerOptionsType = {
+   isRemoteVideoStreamMuted: boolean;
+   isAudioMuted: boolean;
+   currentSelectedAudioOutput: string;
++  /**
++   * True while we are sending our screen (or a window) instead of our camera.
++   * Tracked separately from `selectedCameraId` because a screen share is *video being sent*
++   * even though no camera is selected.
++   */
++  isScreenSharing: boolean;
++  /**
++   * True while the remote peer told us (over the data channel) that they are sharing their screen.
++   * Always false when talking to a client which does not send the `screenShare` field.
++   */
++  isRemoteScreenSharing: boolean;
+ };
+ 
+ export type CallManagerListener = ((options: CallManagerOptionsType) => void) | null;
+@@ -80,9 +92,12 @@ function callVideoListeners() {
+         audioInputsList,
+         audioOutputsList,
+         isRemoteVideoStreamMuted: remoteVideoStreamIsMuted,
+-        isLocalVideoStreamMuted: selectedCameraId === DEVICE_DISABLED_DEVICE_ID,
++        // while sharing our screen we *are* sending video, even though no camera is selected
++        isLocalVideoStreamMuted: !isScreenSharing && selectedCameraId === DEVICE_DISABLED_DEVICE_ID,
+         isAudioMuted: selectedAudioInputId === DEVICE_DISABLED_DEVICE_ID,
+         currentSelectedAudioOutput: selectedAudioOutputId,
++        isScreenSharing,
++        isRemoteScreenSharing: remoteIsScreenSharing,
+       });
+     });
+   }
+@@ -101,7 +116,9 @@ export function addVideoEventsListener(uniqueId: string, listener: CallManagerLi
+ export function removeVideoEventsListener(uniqueId: string) {
+   const indexFound = videoEventsListeners.findIndex(m => m.id === uniqueId);
+   if (indexFound !== -1) {
+-    videoEventsListeners.splice(indexFound);
++    // note: `splice(indexFound)` (one argument) removes *every* listener from that index onwards,
++    // which silently killed the listeners of components unmounted after this one.
++    videoEventsListeners.splice(indexFound, 1);
+   }
+   callVideoListeners();
+ }
+@@ -188,6 +205,24 @@ const configuration: RTCConfiguration = {
+ let selectedCameraId: string = DEVICE_DISABLED_DEVICE_ID;
+ let selectedAudioInputId: string = DEVICE_DISABLED_DEVICE_ID;
+ let selectedAudioOutputId: string = DEVICE_DISABLED_DEVICE_ID;
++
++/**
++ * Screen sharing state.
++ *
++ * Session builds a single video transceiver per call and swaps tracks under it with
++ * `replaceTrack()`. We deliberately reuse that single sender for the screen share rather than
++ * adding a second video m-line: Session's call signalling has no mid-call renegotiation, so an
++ * extra m-line would break calls with unmodified Session clients.
++ *
++ * The consequence, which is by design: while sharing, the camera is off. The camera which was
++ * selected before the share started is restored when the share stops.
++ */
++let isScreenSharing = false;
++let videoChange = 0;
++let pendingShare: number | null = null;
++let screenShareTrack: MediaStreamTrack | null = null;
++let cameraIdBeforeScreenShare: string = DEVICE_DISABLED_DEVICE_ID;
++let remoteIsScreenSharing = false;
+ let camerasList: Array<InputItem> = [];
+ let audioInputsList: Array<InputItem> = [];
+ let audioOutputsList: Array<InputItem> = [];
+@@ -232,9 +267,12 @@ async function updateConnectedDevices() {
+ }
+ 
+ function sendVideoStatusViaDataChannel() {
+-  const videoEnabledLocally = selectedCameraId !== DEVICE_DISABLED_DEVICE_ID;
++  // a screen share is video from the remote peer's point of view, even with no camera selected
++  const videoEnabledLocally = isScreenSharing || selectedCameraId !== DEVICE_DISABLED_DEVICE_ID;
+   const stringToSend = JSON.stringify({
+     video: videoEnabledLocally,
++    // additive field: clients which don't know about it just ignore it when parsing
++    screenShare: isScreenSharing,
+   });
+   if (dataChannel && dataChannel.readyState === 'open') {
+     dataChannel?.send(stringToSend);
+@@ -250,71 +288,145 @@ function sendHangupViaDataChannel() {
+   }
+ }
+ 
+-export async function selectCameraByDeviceId(cameraDeviceId: string) {
+-  if (cameraDeviceId === DEVICE_DISABLED_DEVICE_ID) {
+-    selectedCameraId = DEVICE_DISABLED_DEVICE_ID;
++function cleanupScreenShareTrack() {
++  if (screenShareTrack) {
++    screenShareTrack.onended = null;
++    screenShareTrack.stop();
++    screenShareTrack = null;
++  }
++  isScreenSharing = false;
++}
+ 
+-    const sender = peerConnection?.getSenders().find(s => {
+-      return s.track?.kind === 'video';
+-    });
+-    if (sender?.track) {
+-      sender.track.enabled = false;
++// Capture the sender and preview together. A delayed OS picker or camera request
++// must never install a track in the next call.
++function beginVideoChange() {
++  const connection = peerConnection;
++  const stream = localStream;
++  const sender = connection?.getSenders().find(item => item.track?.kind === 'video');
++  if (!sender || !stream) {
++    return null;
++  }
++  const id = ++videoChange;
++  const current = () =>
++    id === videoChange && connection === peerConnection && stream === localStream;
++  const target = { sender, stream };
++  async function install(track: MediaStreamTrack) {
++    try {
++      if (!current()) {
++        return false;
++      }
++      await target.sender.replaceTrack(track);
++      if (!current()) {
++        return false;
++      }
++      for (const old of target.stream.getVideoTracks()) {
++        target.stream.removeTrack(old);
++        old.stop();
++      }
++      target.stream.addTrack(track);
++      return true;
++    } finally {
++      if (!target.stream.getTracks().includes(track)) {
++        track.stop();
++      }
+     }
++  }
++  return { id, current, install };
++}
+ 
+-    // do the same changes locally
+-    localStream?.getVideoTracks().forEach(t => {
+-      t.stop();
+-      localStream?.removeTrack(t);
+-    });
+-    localStream?.addTrack(getBlackSilenceMediaStream().getVideoTracks()[0]);
+-
+-    sendVideoStatusViaDataChannel();
+-    callVideoListeners();
++export async function startScreenShare(sourceId: string) {
++  if (isScreenSharing || pendingShare !== null) {
+     return;
+   }
+-  if (camerasList.some(m => m.deviceId === cameraDeviceId)) {
+-    selectedCameraId = cameraDeviceId;
+-
+-    const devicesConfig = {
+-      video: {
+-        deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
+-      },
++  const change = beginVideoChange();
++  if (!change) {
++    return;
++  }
++  pendingShare = change.id;
++  try {
++    if (!(await setScreenShareSource(sourceId)) || !change.current()) {
++      return;
++    }
++    const capture = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
++    const track = capture.getVideoTracks()[0];
++    if (!track || !(await change.install(track))) {
++      return;
++    }
++    cameraIdBeforeScreenShare = selectedCameraId;
++    selectedCameraId = DEVICE_DISABLED_DEVICE_ID;
++    screenShareTrack = track;
++    isScreenSharing = true;
++    track.onended = () => {
++      if (screenShareTrack === track) {
++        void stopScreenShare();
++      }
+     };
++    if (track.readyState === 'ended') {
++      await stopScreenShare();
++      return;
++    }
++    sendVideoStatusViaDataChannel();
++    callVideoListeners();
++  } catch (error) {
++    if (change.current() && error.name !== 'NotAllowedError' && error.name !== 'AbortError') {
++      window.log.warn('Could not start screen sharing', error.message);
++      ToastUtils.pushToastError('startScreenShare', error.message);
++    }
++  } finally {
++    if (pendingShare === change.id) {
++      pendingShare = null;
++    }
++  }
++}
+ 
+-    try {
+-      const newVideoStream = await navigator.mediaDevices.getUserMedia(devicesConfig);
+-      const videoTrack = newVideoStream.getVideoTracks()[0];
++export async function stopScreenShare() {
++  if (!isScreenSharing) {
++    return;
++  }
++  const restore = cameraIdBeforeScreenShare;
++  await selectCameraByDeviceId(restore);
++}
+ 
+-      if (!peerConnection) {
+-        throw new Error('cannot selectCameraByDeviceId without a peer connection');
++export async function selectCameraByDeviceId(cameraDeviceId: string) {
++  const change = beginVideoChange();
++  if (!change) {
++    return;
++  }
++  const wasSharing = isScreenSharing;
++  if (wasSharing) {
++    cleanupScreenShareTrack();
++    cameraIdBeforeScreenShare = DEVICE_DISABLED_DEVICE_ID;
++  }
++  try {
++    // Clear the peer's last desktop frame before asking the OS to reopen a camera.
++    if (wasSharing || cameraDeviceId === DEVICE_DISABLED_DEVICE_ID) {
++      if (!(await change.install(getBlackVideoTrack()))) {
++        return;
+       }
+-
+-      window.log.info('replacing video track');
+-      const videoSender = peerConnection
+-        .getTransceivers()
+-        .find(t => t.sender.track?.kind === 'video')?.sender;
+-
+-      videoTrack.enabled = true;
+-      if (videoSender) {
+-        await videoSender.replaceTrack(videoTrack);
+-      } else {
+-        throw new Error(
+-          'We should always have a videoSender as we are using a black video when no camera are in use'
+-        );
+-      }
+-
+-      // do the same changes locally
+-      localStream?.getVideoTracks().forEach(t => {
+-        t.stop();
+-        localStream?.removeTrack(t);
+-      });
+-      localStream?.addTrack(videoTrack);
+-
++      selectedCameraId = DEVICE_DISABLED_DEVICE_ID;
+       sendVideoStatusViaDataChannel();
+       callVideoListeners();
+-    } catch (e) {
+-      window.log.warn('selectCameraByDeviceId failed with', e.message);
+-      ToastUtils.pushToastError('selectCamera', e.message);
++    }
++    if (
++      cameraDeviceId === DEVICE_DISABLED_DEVICE_ID ||
++      !camerasList.some(m => m.deviceId === cameraDeviceId)
++    ) {
++      return;
++    }
++    const camera = await navigator.mediaDevices.getUserMedia({
++      video: { deviceId: { exact: cameraDeviceId } },
++    });
++    if (!(await change.install(camera.getVideoTracks()[0]))) {
++      return;
++    }
++    selectedCameraId = cameraDeviceId;
++    sendVideoStatusViaDataChannel();
++    callVideoListeners();
++  } catch (error) {
++    if (change.current()) {
++      window.log.warn('Could not select camera', error.message);
++      ToastUtils.pushToastError('selectCamera', error.message);
++      sendVideoStatusViaDataChannel();
+       callVideoListeners();
+     }
+   }
+@@ -689,6 +801,8 @@ function handleConnectionStateChanged(pubkey: string) {
+ }
+ 
+ function closeVideoCall() {
++  videoChange += 1;
++  pendingShare = null;
+   window.log.info('closingVideoCall ');
+   currentCallStartTimestamp = undefined;
+   weAreCallerOnCurrentCall = undefined;
+@@ -723,6 +837,10 @@ function closeVideoCall() {
+     peerConnection = null;
+   }
+ 
++  cleanupScreenShareTrack();
++  cameraIdBeforeScreenShare = DEVICE_DISABLED_DEVICE_ID;
++  remoteIsScreenSharing = false;
++
+   localStream = null;
+   remoteStream = null;
+   selectedCameraId = DEVICE_DISABLED_DEVICE_ID;
+@@ -768,6 +886,9 @@ function onDataChannelReceivedMessage(ev: MessageEvent<string>) {
+     if (parsed.video !== undefined) {
+       remoteVideoStreamIsMuted = !parsed.video;
+     }
++
++    // additive field, only sent by clients which support screen sharing
++    remoteIsScreenSharing = parsed.screenShare === true;
+   } catch (e) {
+     window.log.warn('onDataChannelReceivedMessage Could not parse data in event', ev);
+   }
+diff --git a/ts/session/utils/calling/Silence.ts b/ts/session/utils/calling/Silence.ts
+index 9d86488de..661f7ca72 100644
+--- a/ts/session/utils/calling/Silence.ts
++++ b/ts/session/utils/calling/Silence.ts
+@@ -9,7 +9,7 @@ const silence = () => {
+   return Object.assign((dst as any).stream.getAudioTracks()[0], { enabled: false });
+ };
+ 
+-const black = () => {
++export const getBlackVideoTrack = (): MediaStreamTrack => {
+   const canvas = Object.assign(document.createElement('canvas'), {
+     width: maxWidth,
+     height: maxHeight,
+@@ -20,5 +20,5 @@ const black = () => {
+ };
+ 
+ export const getBlackSilenceMediaStream = () => {
+-  return new MediaStream([black(), silence()]);
++  return new MediaStream([getBlackVideoTrack(), silence()]);
+ };
+diff --git a/ts/test/session/unit/calling/call_duck_test.ts b/ts/test/session/unit/calling/call_duck_test.ts
+new file mode 100644
+index 000000000..6abe26bba
+--- /dev/null
++++ b/ts/test/session/unit/calling/call_duck_test.ts
+@@ -0,0 +1,99 @@
++import { assert } from 'chai';
++import Sinon from 'sinon';
++
++import {
++  callConnected,
++  callReducer,
++  endCall,
++  initialCallState,
++  setFullScreenCall,
++  startingCallWith,
++} from '../../../../state/ducks/call';
++import { TestUtils } from '../../../test-utils';
++
++const pubkey = '051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
++
++/**
++ * Bring the state to an ongoing call the same way the app does, so the tests exercise the real
++ * transitions rather than a hand-made state object.
++ */
++function ongoingCallState() {
++  let state = callReducer(initialCallState, startingCallWith({ pubkey }));
++  state = callReducer(state, callConnected({ pubkey }));
++  return state;
++}
++
++describe('state/ducks/call', () => {
++  let originalAudio: unknown;
++
++  beforeEach(() => {
++    TestUtils.stubWindowLog();
++    // RingingManager constructs an Audio() on every call transition; jsdom has no media stack
++    originalAudio = (global as any).Audio;
++    (global as any).Audio = class {
++      public loop = false;
++
++      public volume = 0;
++
++      public srcObject: unknown = null;
++
++      public play() {
++        return Promise.resolve();
++      }
++
++      public pause() {
++        /* nothing to pause in a test */
++      }
++    };
++  });
++
++  afterEach(() => {
++    (global as any).Audio = originalAudio;
++    Sinon.restore();
++  });
++
++  describe('setFullScreenCall', () => {
++    it('goes full screen when a call is ongoing', () => {
++      const state = callReducer(ongoingCallState(), setFullScreenCall(true));
++      assert.isTrue(state.callIsInFullScreen);
++    });
++
++    it('refuses to go full screen when there is no ongoing call', () => {
++      const state = callReducer(initialCallState, setFullScreenCall(true));
++      assert.isFalse(state.callIsInFullScreen);
++    });
++
++    it('refuses to go full screen while the call is still connecting', () => {
++      const connecting = callReducer(initialCallState, startingCallWith({ pubkey }));
++      const state = callReducer(connecting, setFullScreenCall(true));
++      assert.isFalse(state.callIsInFullScreen);
++    });
++
++    it('leaves full screen when asked to', () => {
++      const inFullScreen = callReducer(ongoingCallState(), setFullScreenCall(true));
++      const state = callReducer(inFullScreen, setFullScreenCall(false));
++      assert.isFalse(state.callIsInFullScreen);
++    });
++
++    /**
++     * The full screen overlay is the only thing rendering the remote video once it is up, so a
++     * call which ends while in full screen must not leave the overlay behind.
++     */
++    it('leaves full screen when the call ends', () => {
++      const inFullScreen = callReducer(ongoingCallState(), setFullScreenCall(true));
++      const state = callReducer(callReducer(inFullScreen, endCall()), setFullScreenCall(true));
++      assert.isFalse(state.callIsInFullScreen);
++      assert.isUndefined(state.ongoingWith);
++    });
++
++    /**
++     * Staying in full screen is the whole point of being able to share a screen from it: nothing
++     * about the call's own state may drop us out of it while it is ongoing.
++     */
++    it('stays in full screen across repeated set-true dispatches', () => {
++      let state = callReducer(ongoingCallState(), setFullScreenCall(true));
++      state = callReducer(state, setFullScreenCall(true));
++      assert.isTrue(state.callIsInFullScreen);
++    });
++  });
++});
+diff --git a/ts/test/session/unit/calling/call_video_listeners_test.ts b/ts/test/session/unit/calling/call_video_listeners_test.ts
+new file mode 100644
+index 000000000..0a9f9576d
+--- /dev/null
++++ b/ts/test/session/unit/calling/call_video_listeners_test.ts
+@@ -0,0 +1,74 @@
++import { assert } from 'chai';
++import Sinon from 'sinon';
++
++import {
++  addVideoEventsListener,
++  CallManagerOptionsType,
++  removeVideoEventsListener,
++} from '../../../../session/utils/calling/CallManager';
++import { TestUtils } from '../../../test-utils';
++
++/**
++ * Regression test for `removeVideoEventsListener`, which used to call
++ * `Array.prototype.splice(index)` with a single argument. That removes every element from `index`
++ * onwards, so unmounting one call component silently detached the listeners of every component
++ * registered after it — the in-conversation view would stop updating as soon as the full screen
++ * overlay was closed.
++ */
++describe('CallManager video events listeners', () => {
++  beforeEach(() => {
++    TestUtils.stubWindowLog();
++  });
++
++  afterEach(() => {
++    removeVideoEventsListener('listener-a');
++    removeVideoEventsListener('listener-b');
++    removeVideoEventsListener('listener-c');
++    Sinon.restore();
++  });
++
++  it('removes only the listener it was asked to remove', () => {
++    const calledA = Sinon.spy();
++    const calledB = Sinon.spy();
++    const calledC = Sinon.spy();
++
++    addVideoEventsListener('listener-a', calledA);
++    addVideoEventsListener('listener-b', calledB);
++    addVideoEventsListener('listener-c', calledC);
++
++    const countCBeforeRemoval = calledC.callCount;
++
++    // removing the middle one used to take 'listener-c' with it
++    removeVideoEventsListener('listener-b');
++
++    assert.isAbove(
++      calledC.callCount,
++      countCBeforeRemoval,
++      'listener-c must still be notified after an unrelated listener was removed'
++    );
++
++    const countAAfter = calledA.callCount;
++    const countBAfter = calledB.callCount;
++    const countCAfter = calledC.callCount;
++
++    // any subsequent fan-out reaches a and c, never b
++    addVideoEventsListener('listener-a', calledA);
++
++    assert.isAbove(calledA.callCount, countAAfter);
++    assert.isAbove(calledC.callCount, countCAfter);
++    assert.strictEqual(calledB.callCount, countBAfter);
++  });
++
++  it('reports the screen sharing state to its listeners', () => {
++    const seen: Array<CallManagerOptionsType> = [];
++
++    addVideoEventsListener('listener-a', options => {
++      seen.push(options);
++    });
++
++    assert.isNotEmpty(seen, 'adding a listener notifies it immediately');
++    const lastOptions = seen[seen.length - 1];
++    assert.isFalse(lastOptions.isScreenSharing, 'no call, so we are not sharing anything');
++    assert.isFalse(lastOptions.isRemoteScreenSharing);
++  });
++});
+diff --git a/ts/test/session/unit/calling/screen_share_picker_test.ts b/ts/test/session/unit/calling/screen_share_picker_test.ts
+new file mode 100644
+index 000000000..3d648b713
+--- /dev/null
++++ b/ts/test/session/unit/calling/screen_share_picker_test.ts
+@@ -0,0 +1,44 @@
++import { assert } from 'chai';
++import type { BrowserWindow, Session, WebFrameMain } from 'electron';
++import Sinon from 'sinon';
++
++import type { UserConfig } from '../../../../node/config/user_config';
++import { installScreenSharePicker } from '../../../../node/screenShare';
++
++describe('screen share picker', () => {
++  const pageURL = 'file:///session/background.html';
++
++  it('declines requests from a closed frame and requests with no selected source', () => {
++    const mainFrame = { url: pageURL } as WebFrameMain;
++    const register = Sinon.spy();
++    const window = {
++      webContents: {
++        mainFrame,
++        isDestroyed: () => false,
++        ipc: { handle: Sinon.stub() },
++        session: { setDisplayMediaRequestHandler: register },
++        on: Sinon.stub(),
++        once: Sinon.stub(),
++      },
++    } as unknown as BrowserWindow;
++    installScreenSharePicker(window, pageURL, { get: () => true } as unknown as UserConfig);
++
++    const handle: Parameters<Session['setDisplayMediaRequestHandler']>[0] =
++      register.firstCall.args[0];
++    if (!handle) {
++      throw new Error('Expected the picker to register a display media handler');
++    }
++    const respond = Sinon.spy();
++    const request = {
++      frame: mainFrame,
++      securityOrigin: 'file://',
++      audioRequested: false,
++      videoRequested: true,
++      userGesture: true,
++    };
++    handle({ ...request, frame: null }, respond);
++    handle(request, respond);
++
++    assert.deepEqual(respond.args, [[null], [null]]);
++  });
++});
+diff --git a/ts/util/screenShare.ts b/ts/util/screenShare.ts
+new file mode 100644
+index 000000000..60d975d6f
+--- /dev/null
++++ b/ts/util/screenShare.ts
+@@ -0,0 +1,21 @@
++import { ipcRenderer } from 'electron';
++
++export type ScreenShareSource = {
++  id: string;
++  name: string;
++  thumbnailDataUrl: string | null;
++};
++
++export type ScreenShareSourcesResult = {
++  screenAccess: 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
++  sources: Array<ScreenShareSource>;
++};
++
++export const getScreenShareSources = (): Promise<ScreenShareSourcesResult> =>
++  ipcRenderer.invoke('get-screen-share-sources');
++
++export const setScreenShareSource = (sourceId: string | null): Promise<boolean> =>
++  ipcRenderer.invoke('set-screen-share-source', sourceId);
++
++export const openScreenRecordingSettings = (): Promise<void> =>
++  ipcRenderer.invoke('open-screen-recording-settings');
